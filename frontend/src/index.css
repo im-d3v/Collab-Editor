@@ -1,79 +1,114 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg-0:       #07070d;
+  --bg-1:       #0e0e1a;
+  --bg-2:       #16162a;
+  --bg-3:       #1e1e35;
+  --bg-4:       #26263f;
+  --border:     #2d2d4a;
+  --border-2:   #3d3d65;
+  --accent:     #7c6af7;
+  --accent-h:   #9d8fff;
+  --accent-d:   rgba(124, 106, 247, 0.12);
+  --accent-d2:  rgba(124, 106, 247, 0.06);
+  --text-1:     #eeeef4;
+  --text-2:     #9898b8;
+  --text-3:     #55557a;
+  --success:    #22c55e;
+  --warning:    #f59e0b;
+  --danger:     #f43f5e;
+  --online:     #22c55e;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { height: 100%; }
+
 body {
+  min-height: 100%;
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
   margin: 0;
-  font-family: Arial, sans-serif;
-  background-color: #121212;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* Toast slide-in animation */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Monaco remote cursor/selection decorations */
+.remote-cursor {
+  border-left: 2px solid #f97316;
+}
+.remote-cursor-label::after {
+  content: '▌';
+  color: #f97316;
+  font-size: 9px;
+  position: absolute;
+  top: -10px;
+}
+.remote-selection {
+  background: rgba(249, 115, 22, 0.18);
+}
+
+/* Shared input focus style */
+.cc-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text-1);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+  font-family: inherit;
+}
+.cc-input:focus { border-color: var(--accent); }
+.cc-input::placeholder { color: var(--text-3); }
+
+/* Shared button styles */
+.cc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.cc-btn-primary {
+  background: var(--accent);
   color: #fff;
 }
+.cc-btn-primary:hover:not(:disabled) { background: var(--accent-h); }
+.cc-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Modal backdrop */
-.modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.6);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 999;
+.cc-btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border);
 }
+.cc-btn-ghost:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); border-color: var(--border-2); }
 
-/* Modal box */
-.modal {
-  background-color: #1f1f1f;
-  padding: 2rem;
-  border-radius: 8px;
-  width: 400px;
-  max-width: 90%;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+.cc-btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid transparent;
 }
-
-.modal input[type="email"] {
-  padding: 10px;
-  border-radius: 4px;
-  border: none;
-  width: 100%;
-  background-color: #333;
-  color: white;
-}
-
-.modal button {
-  padding: 8px 16px;
-  background-color: #4caf50;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.modal button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Share button in Editor header */
-.share-btn {
-  padding: 8px 14px;
-  background-color: #1976d2;
-  border: none;
-  border-radius: 4px;
-  color: white;
-  cursor: pointer;
-}
-
-.share-btn:hover {
-  background-color: #1565c0;
-}
-
-/* Loading & error text */
-.editor-loading,
-.editor-error {
-  color: white;
-  font-size: 1.2rem;
-  padding: 2rem;
-  text-align: center;
-}
+.cc-btn-danger:hover:not(:disabled) { background: rgba(244, 63, 94, 0.1); border-color: var(--danger); }
