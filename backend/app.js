@@ -1,67 +1,67 @@
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
+const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
+const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth");
 const documentRoutes = require("./routes/documentRoutes.js");
-const protectedRoutes = require('./routes/protected');
-const socketHandler = require('./socket/socketHandler'); // 👈 NEW
+const socketHandler = require('./socket/socketHandler');
 
 require("dotenv").config();
 
 const app = express();
-const allowedOrigins = [];
-if (process.env.CLIENT_URL) allowedOrigins.push(process.env.CLIENT_URL);
 
+const allowedOrigins = new Set([
+  "http://localhost:5173",
+  "http://localhost:4173",
+]);
+if (process.env.CLIENT_ORIGIN) allowedOrigins.add(process.env.CLIENT_ORIGIN.trim());
+if (process.env.SOCKET_ORIGIN) allowedOrigins.add(process.env.SOCKET_ORIGIN.trim());
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true); // Origin allowed
+    if (allowedOrigins.has(origin)) {
+      callback(null, true);
     } else {
-      console.warn(`CORS Blocked: ${origin}`);
-      callback(null, false); // instead of throwing
+      callback(new Error(`CORS: origin '${origin}' not allowed`));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
+app.use(cors(corsOptions));
+app.use(express.json({ limit: "50kb" }));
+app.use(mongoSanitize());
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests, please try again later." },
+});
 
-app.use(express.json());
-
-app.use("/api/auth", authRoutes);
-app.use("/api", protectedRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/documents", documentRoutes);
+
+app.get("/api/health", (_, res) => res.json({ status: "ok" }));
 
 const server = http.createServer(app);
 
-const io = new Server(server, {
-  cors: {
-    origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl)
-      if (!origin) return callback(null, true);
+const io = new Server(server, { cors: corsOptions });
 
-      if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true); // Origin allowed
-    } else {
-      console.warn(`CORS Blocked: ${origin}`);
-      callback(null, false); // instead of throwing
-    }
-    },
-    credentials: true
-  }
-});
-
-
-// 🔌 Use socket handler here
 socketHandler(io);
 
-// Connect DB and start server
 connectDB().then(() => {
   const PORT = process.env.PORT || 5000;
-  server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 });
