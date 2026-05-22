@@ -7,21 +7,15 @@ const {
   updateDocument,
   getAllDocuments,
   deleteDocument,
-  shareDocument
+  shareDocument,
+  getChatHistory,
 } = require('../controllers/documentController');
 
-router.use(authMiddleware); // Apply to all
+router.use(authMiddleware);
 
-router.route("/")
-  .post(createDocument)
-  .get(getAllDocuments);
-
-router.route("/:id")
-  .get(getDocumentById)
-  .put(updateDocument)
-  .delete(deleteDocument);
-
-router.route("/share/:id")
-  .post(shareDocument);
+router.route("/").post(createDocument).get(getAllDocuments);
+router.route("/:id").get(getDocumentById).put(updateDocument).delete(deleteDocument);
+router.route("/share/:id").post(shareDocument);
+router.route("/:id/chat").get(getChatHistory);
 
 module.exports = router;
