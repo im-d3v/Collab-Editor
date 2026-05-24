@@ -16,8 +16,11 @@ const app = express();
 // ── Allowed origins ────────────────────────────────────────────────────────
 // Comma-separated values supported: CLIENT_ORIGIN=https://a.com,https://b.com
 const allowedOrigins = new Set([
+  // Local dev
   "http://localhost:5173",
   "http://localhost:4173",
+  // Production (hardcoded so it works even if the env var is missing)
+  "https://collab-editor-d7mh.onrender.com",
 ]);
 
 const addOrigins = (envVal) => {
