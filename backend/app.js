@@ -1,7 +1,7 @@
 const express = require("express");
 const http = require("http");
 const helmet = require("helmet");
-const cors = require("cors");
+const cors = require("cors");          // kept only for Socket.IO internal use
 const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
@@ -14,8 +14,7 @@ require("dotenv").config();
 const app = express();
 
 // ── Allowed origins ────────────────────────────────────────────────────────
-// Hard-coded dev origins + anything listed in CLIENT_ORIGIN / SOCKET_ORIGIN
-// (both env vars support comma-separated values, e.g. "https://a.com,https://b.com")
+// Comma-separated values supported: CLIENT_ORIGIN=https://a.com,https://b.com
 const allowedOrigins = new Set([
   "http://localhost:5173",
   "http://localhost:4173",
@@ -24,31 +23,55 @@ const allowedOrigins = new Set([
 const addOrigins = (envVal) => {
   if (!envVal) return;
   envVal.split(",").forEach((o) => {
-    const trimmed = o.trim();
-    if (trimmed) allowedOrigins.add(trimmed);
+    const t = o.trim();
+    if (t) allowedOrigins.add(t);
   });
 };
 addOrigins(process.env.CLIENT_ORIGIN);
 addOrigins(process.env.SOCKET_ORIGIN);
 
-// Log resolved origins once at startup so they're visible in Render logs
-console.log("Allowed CORS origins:", [...allowedOrigins]);
+console.log("✅ Allowed CORS origins:", [...allowedOrigins]);
 
-// ── CORS ───────────────────────────────────────────────────────────────────
+// ── Raw CORS middleware (Express-v5 safe) ──────────────────────────────────
+// The cors npm package uses res.end() in a way that conflicts with Express v5.
+// This hand-rolled version is explicit and has no external dependencies.
+app.use((req, res, next) => {
+  const origin = req.headers.origin || "";
+  const isAllowed = !origin || allowedOrigins.has(origin);
+
+  res.setHeader("Vary", "Origin");
+
+  if (isAllowed && origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+
+  if (req.method === "OPTIONS") {
+    console.log(`[CORS preflight] origin="${origin}" allowed=${isAllowed}`);
+    if (isAllowed) {
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Max-Age", "86400");
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    // Unknown origin – end with 403 (no CORS header → browser blocks the real request)
+    res.statusCode = 403;
+    res.end();
+    return;
+  }
+
+  next();
+});
+
+// corsOptions is only used for Socket.IO's built-in CORS handler
 const corsOptions = {
-  origin: (origin, cb) => {
-    // Allow same-origin / server-to-server (no Origin header) or listed origins
-    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
-    cb(new Error(`CORS blocked for origin: ${origin}`));
-  },
+  origin: (origin, cb) =>
+    !origin || allowedOrigins.has(origin) ? cb(null, true) : cb(new Error(`CORS blocked: ${origin}`)),
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
-  optionsSuccessStatus: 204,
 };
-
-// cors() handles preflight OPTIONS automatically and sets the correct headers
-app.use(cors(corsOptions));
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
