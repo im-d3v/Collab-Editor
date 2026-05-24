@@ -1,6 +1,7 @@
 const express = require("express");
 const http = require("http");
 const helmet = require("helmet");
+const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
@@ -12,32 +13,45 @@ require("dotenv").config();
 
 const app = express();
 
+// ── Allowed origins ────────────────────────────────────────────────────────
+// Hard-coded dev origins + anything listed in CLIENT_ORIGIN / SOCKET_ORIGIN
+// (both env vars support comma-separated values, e.g. "https://a.com,https://b.com")
 const allowedOrigins = new Set([
   "http://localhost:5173",
   "http://localhost:4173",
 ]);
-if (process.env.CLIENT_ORIGIN) allowedOrigins.add(process.env.CLIENT_ORIGIN.trim());
-if (process.env.SOCKET_ORIGIN) allowedOrigins.add(process.env.SOCKET_ORIGIN.trim());
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.has(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  }
-  if (req.method === "OPTIONS") return res.status(204).end();
-  next();
-});
+const addOrigins = (envVal) => {
+  if (!envVal) return;
+  envVal.split(",").forEach((o) => {
+    const trimmed = o.trim();
+    if (trimmed) allowedOrigins.add(trimmed);
+  });
+};
+addOrigins(process.env.CLIENT_ORIGIN);
+addOrigins(process.env.SOCKET_ORIGIN);
+
+// Log resolved origins once at startup so they're visible in Render logs
+console.log("Allowed CORS origins:", [...allowedOrigins]);
+
+// ── CORS ───────────────────────────────────────────────────────────────────
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Allow same-origin / server-to-server (no Origin header) or listed origins
+    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
+    cb(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+
+// cors() handles preflight OPTIONS automatically and sets the correct headers
+app.use(cors(corsOptions));
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
-const corsOptions = {
-  origin: (origin, cb) => (!origin || allowedOrigins.has(origin) ? cb(null, true) : cb(new Error("CORS blocked"))),
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
 app.use(express.json({ limit: "50kb" }));
 app.use((req, _res, next) => {
   const sanitize = (obj) => {
