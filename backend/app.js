@@ -1,8 +1,6 @@
 const express = require("express");
 const http = require("http");
-const cors = require("cors");
 const helmet = require("helmet");
-const mongoSanitize = require("express-mongo-sanitize");
 const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
@@ -21,26 +19,43 @@ const allowedOrigins = new Set([
 if (process.env.CLIENT_ORIGIN) allowedOrigins.add(process.env.CLIENT_ORIGIN.trim());
 if (process.env.SOCKET_ORIGIN) allowedOrigins.add(process.env.SOCKET_ORIGIN.trim());
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  }
+  if (req.method === "OPTIONS") return res.status(204).end();
+  next();
+});
+
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+
 const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.has(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: origin '${origin}' not allowed`));
-    }
-  },
-  credentials: true,
+  origin: (origin, cb) => (!origin || allowedOrigins.has(origin) ? cb(null, true) : cb(new Error("CORS blocked"))),
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
-
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-}));
-app.use(cors(corsOptions));
 app.use(express.json({ limit: "50kb" }));
-app.use(mongoSanitize());
+app.use((req, _res, next) => {
+  const sanitize = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const key of Object.keys(obj)) {
+      if (key.startsWith('$') || key.includes('.')) {
+        delete obj[key];
+      } else {
+        sanitize(obj[key]);
+      }
+    }
+  };
+  sanitize(req.body);
+  sanitize(req.params);
+  // req.query is a getter-only property in Express v5 — mutate in-place, never reassign
+  sanitize(req.query);
+  next();
+});
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

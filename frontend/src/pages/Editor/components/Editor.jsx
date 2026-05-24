@@ -26,6 +26,7 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [remoteCursors, setRemoteCursors] = useState({});
+  const [connected, setConnected] = useState(socket.connected);
 
   const navigate = useNavigate();
   const { id } = useParams();
@@ -34,6 +35,9 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
   const titleRef = useRef(title);
   const languageRef = useRef(language);
   const editorRef = useRef(null);
+  // Concurrent-edit tracking
+  const serverVersionRef = useRef(0);   // last version confirmed by the server
+  const isRemoteUpdateRef = useRef(false); // prevent echo-loop when setting content from socket
 
   useEffect(() => { titleRef.current = title; }, [title]);
   useEffect(() => { languageRef.current = language; }, [language]);
@@ -43,6 +47,7 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
       setTitle(data.title || 'Untitled');
       setLanguage(data.language || 'javascript');
       setContent(data.content || '');
+      serverVersionRef.current = 0; // reset on document load
     }
   }, [data]);
 
@@ -63,17 +68,18 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
   ).current;
 
   const handleEditorChange = (value) => {
+    if (isRemoteUpdateRef.current) return; // ignore programmatic updates
     setContent(value);
     setSaveStatus('unsaved');
     saveToServer(value);
-    socket.emit("send_code", { code: value, room: id });
+    socket.emit("send_code", { code: value, room: id, baseVersion: serverVersionRef.current });
     socket.emit("user_editing", { room: id, user });
   };
 
   const handleTitleSave = async () => {
     setIsTitleEditing(false);
     try {
-      await API.put(`/documents/${id}`, { title, language, content });
+      await API.put(`/documents/${id}`, { title, language });
       addToast("Title saved.", "success");
     } catch {
       addToast("Failed to save title.", "error");
@@ -84,7 +90,7 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
     const lang = e.target.value;
     setLanguage(lang);
     try {
-      await API.put(`/documents/${id}`, { title, language: lang, content });
+      await API.put(`/documents/${id}`, { title, language: lang });
     } catch {
       addToast("Failed to update language.", "error");
     }
@@ -126,17 +132,51 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
   }, [remoteCursors, user?._id]);
 
   useEffect(() => {
-    socket.on("receive_code", code => setContent(code));
-    socket.on("receive_cursor_position", ({ userId, position }) =>
-      setRemoteCursors(p => ({ ...p, [userId]: { ...(p[userId] || {}), position } }))
-    );
-    socket.on("receive_cursor_selection", ({ userId, selection }) =>
-      setRemoteCursors(p => ({ ...p, [userId]: { ...(p[userId] || {}), selection } }))
-    );
+    const onConnect = () => setConnected(true);
+    const onDisconnect = () => setConnected(false);
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+
+    const onReceiveCode = ({ code, version }) => {
+      isRemoteUpdateRef.current = true;
+      setContent(code);
+      serverVersionRef.current = version;
+      // Reset flag after React has flushed the state update
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 0);
+    };
+
+    const onCodeAccepted = ({ version }) => {
+      serverVersionRef.current = version;
+    };
+
+    // Server rejected our edit because another user already changed the document.
+    // Restore the authoritative content and notify the user.
+    const onCodeConflict = ({ code, version }) => {
+      isRemoteUpdateRef.current = true;
+      setContent(code);
+      serverVersionRef.current = version;
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 0);
+      addToast("Edit conflict: another user's changes took priority. Your editor has been updated.", "warning");
+    };
+
+    const onCursorPos = ({ userId, position }) =>
+      setRemoteCursors(p => ({ ...p, [userId]: { ...(p[userId] || {}), position } }));
+    const onCursorSel = ({ userId, selection }) =>
+      setRemoteCursors(p => ({ ...p, [userId]: { ...(p[userId] || {}), selection } }));
+
+    socket.on("receive_code", onReceiveCode);
+    socket.on("code_accepted", onCodeAccepted);
+    socket.on("code_conflict", onCodeConflict);
+    socket.on("receive_cursor_position", onCursorPos);
+    socket.on("receive_cursor_selection", onCursorSel);
     return () => {
-      socket.off("receive_code");
-      socket.off("receive_cursor_position");
-      socket.off("receive_cursor_selection");
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("receive_code", onReceiveCode);
+      socket.off("code_accepted", onCodeAccepted);
+      socket.off("code_conflict", onCodeConflict);
+      socket.off("receive_cursor_position", onCursorPos);
+      socket.off("receive_cursor_selection", onCursorSel);
     };
   }, []);
 
@@ -269,8 +309,8 @@ function MainEditor({ data, sidebarOpen, chatOpen, onToggleSidebar, onToggleChat
         <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.8)" }}>{language.charAt(0).toUpperCase() + language.slice(1)}</span>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.8)", display: "flex", alignItems: "center", gap: "4px" }}>
-          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#4ade80", display: "inline-block" }} />
-          Connected
+          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: connected ? "#4ade80" : "#f43f5e", display: "inline-block" }} />
+          {connected ? "Connected" : "Disconnected"}
         </span>
       </div>
     </div>

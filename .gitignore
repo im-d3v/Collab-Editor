@@ -52,3 +52,12 @@ Thumbs.db
 *.log
 *.bak
 *.tmp
+
+# -------------------
+# AI assistant / IDE agent config (never commit these)
+# -------------------
+.claude/
+.codemie/
+.github/
+CLAUDE.md
+

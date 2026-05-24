@@ -2,6 +2,9 @@ const Document = require('../models/Document');
 
 const documentUsers = {};
 const editingUsers = {};
+// Server-authoritative state for conflict detection
+const documentVersion = {};   // roomId -> current version number
+const documentContent = {};   // roomId -> latest content string (in-memory for active sessions)
 
 function socketHandler(io) {
   io.on("connection", (socket) => {
@@ -16,6 +19,15 @@ function socketHandler(io) {
         documentUsers[documentId].push(user);
       }
       io.to(documentId).emit("user_list", documentUsers[documentId]);
+
+      // If this room already has in-memory content (other users are active),
+      // push it to the newly-joined socket so everyone stays in sync.
+      if (documentContent[documentId] !== undefined) {
+        socket.emit("receive_code", {
+          code: documentContent[documentId],
+          version: documentVersion[documentId] || 0,
+        });
+      }
     });
 
     socket.on("leave_room", (documentId) => {
@@ -27,12 +39,38 @@ function socketHandler(io) {
       }
     });
 
-    socket.on("send_code", ({ code, room }) => {
-      socket.to(room).emit("receive_code", code);
+    socket.on("send_code", ({ code, room, baseVersion }) => {
+      // Initialise version tracking for this room on first edit
+      if (documentVersion[room] === undefined) {
+        documentVersion[room] = 0;
+      }
+
+      // --- Conflict detection ---
+      // baseVersion is the version the client last received from the server.
+      // If it differs from the current room version, this edit was based on
+      // stale content — reject it and send the authoritative state back.
+      if (baseVersion !== undefined && baseVersion !== documentVersion[room]) {
+        socket.emit("code_conflict", {
+          code: documentContent[room],
+          version: documentVersion[room],
+        });
+        return;
+      }
+
+      // Accept the edit: advance version and cache content
+      documentVersion[room]++;
+      documentContent[room] = code;
+
+      // Tell the sender what the new server version is
+      socket.emit("code_accepted", { version: documentVersion[room] });
+
+      // Broadcast the new content+version to every other client in the room
+      socket.to(room).emit("receive_code", { code, version: documentVersion[room] });
     });
 
     socket.on("send_chat", async ({ documentId, ...message }) => {
-      socket.to(documentId).emit("receive_chat", message);
+      const outgoing = { ...message, timestamp: message.timestamp || new Date().toISOString() };
+      socket.to(documentId).emit("receive_chat", outgoing);
       try {
         await Document.updateOne(
           { _id: documentId },
@@ -68,7 +106,7 @@ function socketHandler(io) {
         const lastEdit = editingUsers[room]?.[user._id];
         if (lastEdit && Date.now() - lastEdit >= 3000) {
           delete editingUsers[room][user._id];
-          socket.to(room).emit("user_editing_update", {
+          io.to(room).emit("user_editing_update", {
             userId: user._id,
             name: user.name,
             isEditing: false,
